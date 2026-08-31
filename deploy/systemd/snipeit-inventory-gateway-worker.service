@@ -1,0 +1,39 @@
+[Unit]
+Description=SnipeIT Inventory Gateway v1.0.0 queue worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=snipeit-inventory-gateway
+Group=snipeit-inventory-gateway
+Environment=SNIPEIT_GATEWAY_CONFIG=/etc/snipeit-inventory-gateway/config.json
+ExecStart=/opt/snipeit-inventory-gateway/current/venv/bin/snipeit-inventory-gateway worker
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadOnlyPaths=/etc/snipeit-inventory-gateway
+ReadWritePaths=/var/lib/snipeit-inventory-gateway /var/log/snipeit-inventory-gateway
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

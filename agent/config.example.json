@@ -1,0 +1,16 @@
+{
+  "SchemaVersion": 1,
+  "GatewayUrl": "https://inventory-gateway.example.com:2443/api/v1/events",
+  "KeyId": "REPLACE_WITH_DEVICE_KEY_ID",
+  "MasterKeyPath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\Config\\event-master-key.txt",
+  "EnableSmtpFallback": true,
+  "SmtpCredentialPath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\Config\\smtp-credential.json",
+  "SmtpHost": "smtp.example.com",
+  "SmtpPort": 587,
+  "MailFrom": "notification@example.com",
+  "MailTo": "inventory@example.com",
+  "StatePath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\State\\state.json",
+  "QueuePath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\Queue",
+  "LogPath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\Logs\\agent.log",
+  "MaxQueueAttemptsPerRun": 10
+}

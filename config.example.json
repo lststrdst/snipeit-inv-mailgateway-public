@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "environment": "staging",
+  "keys": [
+    {
+      "key_id": "fleet-2026-01",
+      "master_key": "base64:REPLACE_WITH_32_CRYPTOGRAPHICALLY_RANDOM_BYTES",
+      "decrypt_only": false,
+      "allowed_computers": ["REPLACE_WITH_ENROLLED_HOSTNAME"]
+    }
+  ],
+  "queue": {
+    "path": "/var/lib/snipeit-inventory-gateway/events.sqlite3",
+    "max_attempts": 12,
+    "lease_seconds": 300,
+    "retry_base_seconds": 30,
+    "retry_max_seconds": 3600,
+    "retention_days": 365
+  },
+  "api": {
+    "bind_host": "127.0.0.1",
+    "bind_port": 8787,
+    "max_body_bytes": 262144,
+    "max_clock_skew_seconds": 900
+  },
+  "snipeit": {
+    "url": "https://127.0.0.1",
+    "host_header": "REPLACE_WITH_LOCAL_SNIPEIT_HOST",
+    "api_token": "REPLACE_SERVER_SIDE_ONLY",
+    "verify_tls": false,
+    "timeout_seconds": 30,
+    "inventory_endpoint": "/api/v1/hardware/byserial/{serial}",
+    "create_endpoint": "/api/v1/hardware",
+    "update_endpoint": "/api/v1/hardware/{asset_id}",
+    "user_search_endpoint": "/api/v1/users",
+    "checkin_endpoint": "/api/v1/hardware/{asset_id}/checkin",
+    "checkout_endpoint": "/api/v1/hardware/{asset_id}/checkout",
+    "default_model_id": 1,
+    "default_status_id": 8,
+    "custom_field_map": {
+      "ram_bytes": "_snipeit_example_ram_1",
+      "cpu": "_snipeit_example_cpu_2",
+      "os": "_snipeit_example_os_3",
+      "disks": "_snipeit_example_storage_4",
+      "agent_version": "_snipeit_example_agent_version_5"
+    }
+  },
+  "imap": {
+    "host": "imap.example.com",
+    "port": 993,
+    "user": "inventory@example.com",
+    "password": "",
+    "inbox": "INBOX",
+    "parent_folder": "SnipeIT Inventory",
+    "allowed_from": ["notification@example.com"],
+    "max_messages_per_run": 200,
+    "max_message_bytes": 2097152,
+    "terminal_wait_seconds": 45
+  },
+  "smtp": {
+    "host": "smtp.example.com",
+    "port": 587,
+    "user": "notification@example.com",
+    "password": "",
+    "from_address": "notification@example.com",
+    "to_address": "inventory@example.com",
+    "starttls": true
+  },
+  "notifications": {
+    "throttle_seconds": 3600,
+    "weekly_weekday": 0,
+    "weekly_hour": 9
+  }
+}

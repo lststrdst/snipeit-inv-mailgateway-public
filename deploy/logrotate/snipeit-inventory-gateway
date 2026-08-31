@@ -1,0 +1,10 @@
+/var/log/snipeit-inventory-gateway/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 snipeit-inventory-gateway snipeit-inventory-gateway
+    su snipeit-inventory-gateway snipeit-inventory-gateway
+}
