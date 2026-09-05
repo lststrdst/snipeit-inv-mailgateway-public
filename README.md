@@ -118,3 +118,7 @@ production-логотип и реальные скриншоты сюда нам
 сверю реальные Snipe-IT field handles/IDs, проверю IMAP/SMTP, TLS-сертификат,
 split DNS, NAT и rollback drill. Production cutover выполню после этого
 staging и отдельного подтверждения.
+
+---
+
+© lststrdst
