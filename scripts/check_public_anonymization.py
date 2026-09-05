@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {
     "",
     ".conf",
+    ".htm",
+    ".html",
     ".json",
     ".md",
     ".ps1",

@@ -27,3 +27,12 @@ def test_author_signature_does_not_hide_other_blocked_literals(tmp_path):
     for literal in CHECKER["BLOCKED_LITERALS"]:
         text = f"{SIGNATURE}\n{literal}\n"
         assert CHECKER["findings"](tmp_path, tmp_path / "README.md", text)
+
+
+@pytest.mark.parametrize("suffix", [".htm", ".html"])
+def test_html_examples_are_checked_for_internal_identifiers(tmp_path, monkeypatch, suffix):
+    assert suffix in CHECKER["TEXT_SUFFIXES"]
+    literal = sorted(CHECKER["BLOCKED_LITERALS"])[0]
+    (tmp_path / f"example{suffix}").write_text(f"<p>{literal}</p>", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["check_public_anonymization.py", str(tmp_path)])
+    assert CHECKER["main"]() == 1
