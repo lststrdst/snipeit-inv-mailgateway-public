@@ -32,6 +32,7 @@ BLOCKED_LITERALS = {
     "trans" + "com",
     "yan" + "dex.ru",
 }
+PUBLIC_AUTHOR_SIGNATURE = "© " + "lst" + "strdst"
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 IP_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 INTERNAL_DIRECTORY_RE = re.compile(r"(?:^|[\s,])(OU|DC)=[^\s,]+", re.IGNORECASE)
@@ -40,6 +41,11 @@ INTERNAL_FIELD_RE = re.compile(r"_snipeit_(?!example_)[a-z0-9_]+_\d+", re.IGNORE
 
 
 def findings(root: Path, path: Path, text: str) -> list[str]:
+    # Я разрешаю публичный ник только в отдельной строке подписи корневого README.
+    if path.relative_to(root) == Path("README.md"):
+        text = "\n".join(
+            "" if line == PUBLIC_AUTHOR_SIGNATURE else line for line in text.splitlines()
+        )
     lower = text.lower()
     result = [f"blocked literal: {value}" for value in BLOCKED_LITERALS if value in lower]
     for match in EMAIL_RE.finditer(text):

@@ -9,7 +9,7 @@ from snipeit_inventory_gateway.mail_contract import mail_subject, subject_matche
         ("relay", "RELAY"),
         ("computer-report", "REPORT"),
         ("weekly-report", "WEEKLY"),
-        ("owner-change", "OWNER"),
+        ("owner-change", "OWNER CHANGE"),
         ("error", "ERROR"),
         ("recovery", "RECOVERY"),
     ],

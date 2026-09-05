@@ -27,11 +27,16 @@ dead-letter, поэтому изображать очередь папками `
 | Метка | Пример темы | Папка |
 |---|---|---|
 | `REPORT` | `[SnipeIT Inventory Gateway][REPORT] LAPTOP-107 · инвентаризация обновлена` | `Reports` |
-| `OWNER` | `[SnipeIT Inventory Gateway][OWNER] LAPTOP-107 · user.old → user.new` | `Reports` |
+| `OWNER CHANGE` | `[SnipeIT Inventory Gateway][OWNER CHANGE] LAPTOP-107 · user.old → user.new` | `Reports` |
 | `WEEKLY` | `[SnipeIT Inventory Gateway][WEEKLY] 2026-W36 · критично 2 из 148` | `Weekly Reports` |
 | `RELAY` | `[SnipeIT Inventory Gateway][RELAY] LAPTOP-107 - event 42feb0c84dd87022` | `Reports` после успешной обработки, иначе `Errors` |
 | `ERROR` | `[SnipeIT Inventory Gateway][ERROR] IMAP · требуется внимание` | `Errors` |
 | `RECOVERY` | `[SnipeIT Inventory Gateway][RECOVERY] IMAP · работа восстановлена` | `Errors` рядом с исходным инцидентом |
+
+`RECOVERY` означает восстановление работы после зарегистрированной ошибки:
+например, IMAP снова доступен или обработчик очереди возобновил работу.
+Я отправляю это уведомление один раз после инцидента и сохраняю рядом с
+ошибкой, чтобы было видно, что сбой завершился.
 
 Тема нужна человеку для быстрого просмотра, но не является единственным
 критерием. Категория подтверждается `X-SnipeIT-Category`; класс письма —
