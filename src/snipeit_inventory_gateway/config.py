@@ -68,11 +68,12 @@ class ApiConfig(BaseModel):
 class SnipeITConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     url: str = "https://127.0.0.1"
-    host_header: str = "snipeit.example.com"
+    host_header: str = "snipeit.local"
     api_token: SecretStr
     verify_tls: bool = False
     timeout_seconds: int = Field(30, ge=2, le=120)
     inventory_endpoint: str = "/api/v1/hardware/byserial/{serial}"
+    hardware_list_endpoint: str = "/api/v1/hardware"
     create_endpoint: str = "/api/v1/hardware"
     update_endpoint: str = "/api/v1/hardware/{asset_id}"
     user_search_endpoint: str = "/api/v1/users"
@@ -92,6 +93,7 @@ class SnipeITConfig(BaseModel):
 
     @field_validator(
         "inventory_endpoint",
+        "hardware_list_endpoint",
         "create_endpoint",
         "update_endpoint",
         "user_search_endpoint",
@@ -113,10 +115,26 @@ class ImapConfig(BaseModel):
     password: SecretStr
     inbox: str = "INBOX"
     parent_folder: str = "SnipeIT Inventory"
+    folder_separator: str = "/"
+    trash_folder: str = "Trash"
     allowed_from: list[str] = Field(default_factory=list)
     max_messages_per_run: int = Field(200, ge=1, le=1000)
     max_message_bytes: int = Field(2097152, ge=4096, le=10485760)
     terminal_wait_seconds: int = Field(45, ge=1, le=300)
+
+    @field_validator("inbox", "parent_folder", "trash_folder")
+    @classmethod
+    def safe_mailbox_name(cls, value: str) -> str:
+        if not value.strip() or "\r" in value or "\n" in value or len(value) > 255:
+            raise ValueError("IMAP mailbox name is invalid")
+        return value.strip()
+
+    @field_validator("folder_separator")
+    @classmethod
+    def safe_folder_separator(cls, value: str) -> str:
+        if len(value) != 1 or ord(value) < 33 or ord(value) > 126:
+            raise ValueError("folder_separator must be one printable ASCII character")
+        return value
 
 
 class SmtpConfig(BaseModel):
@@ -135,6 +153,58 @@ class NotificationConfig(BaseModel):
     throttle_seconds: int = Field(3600, ge=60, le=86400)
     weekly_weekday: int = Field(0, ge=0, le=6)
     weekly_hour: int = Field(9, ge=0, le=23)
+    timezone: str = "Europe/Moscow"
+    weekly_stale_days: int = Field(7, ge=1, le=90)
+    weekly_critical_days: int = Field(14, ge=2, le=365)
+    weekly_category_ids: list[int] = Field(default_factory=lambda: [1])
+    weekly_max_rows: int = Field(250, ge=10, le=1000)
+
+    @model_validator(mode="after")
+    def thresholds_are_ordered(self) -> NotificationConfig:
+        if self.weekly_critical_days <= self.weekly_stale_days:
+            raise ValueError("weekly_critical_days must be greater than weekly_stale_days")
+        return self
+
+
+class OwnershipConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username_pattern: str = r"^[a-z]\.[a-z]+(?:-[a-z]+)?$"
+    # Exact allow-list for legacy user names outside ``initial.surname``.
+    non_standard_accounts: list[str] = Field(default_factory=list)
+    confirmation_events: int = Field(3, ge=2, le=20)
+    confirmation_hours: int = Field(24, ge=1, le=720)
+    candidate_window_days: int = Field(7, ge=1, le=90)
+
+    @field_validator("username_pattern")
+    @classmethod
+    def valid_username_pattern(cls, value: str) -> str:
+        import re
+
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError("username_pattern must be a valid regular expression") from exc
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_exception_field(cls, data: object) -> object:
+        """Accept the old field once, then keep one canonical config field."""
+        if not isinstance(data, dict) or "username_exceptions" not in data:
+            return data
+        migrated = dict(data)
+        legacy = migrated.pop("username_exceptions") or []
+        current = migrated.get("non_standard_accounts") or []
+        migrated["non_standard_accounts"] = [*current, *legacy]
+        return migrated
+
+    @field_validator("non_standard_accounts")
+    @classmethod
+    def normalize_exceptions(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip().lower() for item in value if item.strip()]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("non_standard_accounts must not contain duplicates")
+        return normalized
 
 
 class GatewayConfig(BaseModel):
@@ -148,6 +218,7 @@ class GatewayConfig(BaseModel):
     imap: ImapConfig
     smtp: SmtpConfig
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
+    ownership: OwnershipConfig = Field(default_factory=OwnershipConfig)
 
     @model_validator(mode="after")
     def unique_keys_and_accounts(self) -> GatewayConfig:
@@ -155,9 +226,17 @@ class GatewayConfig(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("key_id values must be unique")
         if self.imap.user.lower() != self.smtp.to_address.lower():
-            raise ValueError("IMAP user must match the SMTP notification recipient")
+            raise ValueError("IMAP account must match the notification recipient")
         if self.smtp.user.lower() != self.smtp.from_address.lower():
-            raise ValueError("SMTP login must match the notification sender")
+            raise ValueError("SMTP authentication account must match the notification sender")
+        if self.imap.user.lower() == self.smtp.user.lower():
+            raise ValueError("IMAP and SMTP service accounts must be different identities")
+        if [value.lower() for value in self.imap.allowed_from] != [
+            self.smtp.from_address.lower()
+        ]:
+            raise ValueError("IMAP sender allow-list must contain only the notification sender")
+        if self.imap.password.get_secret_value() == self.smtp.password.get_secret_value():
+            raise ValueError("IMAP and SMTP service accounts must use different passwords")
         if self.environment == "production" and any(not key.allowed_computers for key in self.keys):
             raise ValueError("production ingest keys must be bound to allowed_computers")
         return self

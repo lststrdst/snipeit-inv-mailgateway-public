@@ -6,22 +6,36 @@ from snipeit_inventory_gateway.snipeit import SnipeITClient
 
 @pytest.mark.parametrize(
     "username",
-    ["SYSTEM", "shared-terminal", "svc_backup", "service_sync", "ad_join", "DWM-1", "krbtgt"],
+    ["SYSTEM", "legacyservice", "svc_backup", "service_sync", "ad_join", "DWM-1", "krbtgt", "admin.user"],
 )
 def test_system_and_service_identities_never_become_owner(username):
     assert safe_owner({"detected_username": username}) is None
 
 
 def test_endpoint_offboarding_hints_are_never_authoritative():
-    assert disposition({"detected_username": "demo.user", "ou_terminated_hint": True})[0] == "assigned"
+    assert disposition({"detected_username": "d.user", "ou_terminated_hint": True})[0] == "assigned"
     assert (
-        disposition({"detected_username": "demo.user", "description_terminated_hint": True})[0]
+        disposition({"detected_username": "d.user", "description_terminated_hint": True})[0]
         == "assigned"
     )
-    assert disposition({"detected_username": "demo.user", "authoritative_disabled": True}) == (
+    assert disposition({"detected_username": "d.user", "authoritative_disabled": True}) == (
         "assigned",
-        "demo.user",
+        "d.user",
     )
+
+
+def test_nonstandard_username_requires_private_configuration_exception():
+    assert safe_owner({"detected_username": "ExampleUser"}) is None
+    assert safe_owner({"detected_username": "ExampleUser"}, non_standard_accounts=["exampleuser"]) == "exampleuser"
+
+
+def test_legacy_exception_keyword_remains_compatible():
+    assert safe_owner({"detected_username": "ExampleUser"}, username_exceptions=["exampleuser"]) == "exampleuser"
+
+
+@pytest.mark.parametrize("username", ["administrator", "svc_inventory", "ad_join"])
+def test_protected_accounts_cannot_be_allowlisted(username):
+    assert safe_owner({"detected_username": username}, non_standard_accounts=[username]) is None
 
 
 class FakeClient(SnipeITClient):
@@ -36,32 +50,32 @@ class FakeClient(SnipeITClient):
 
 
 def test_assignment_uses_exact_user_and_fixed_checkout_endpoint(config, payload):
-    payload["identity"] = {"detected_username": "DOMAIN\\demo.user"}
+    payload["identity"] = {"detected_username": "DOMAIN\\d.user"}
     client = FakeClient(
         config.snipeit,
         [
             {"rows": [{"id": 55, "assigned_to": None}]},
             {"status": "success"},
-            {"rows": [{"id": 77, "username": "demo.user"}]},
+            {"rows": [{"id": 77, "username": "d.user"}]},
             {"status": "success"},
         ],
     )
-    assert client.apply(payload) == "asset_id=55;assigned:demo.user"
+    assert client.apply(payload, owner_username="d.user") == "asset_id=55;owner_changed:->d.user"
     assert client.calls[-1][0:2] == ("POST", "/api/v1/hardware/55/checkout")
     assert client.calls[-1][2]["json"]["assigned_user"] == 77
 
 
 def test_endpoint_cannot_force_checkin(config, payload):
-    payload["identity"] = {"detected_username": "demo.user", "authoritative_disabled": True}
+    payload["identity"] = {"detected_username": "d.user", "authoritative_disabled": True}
     client = FakeClient(
         config.snipeit,
         [
             {"rows": [{"id": 55, "assigned_to": {"id": 77}}]},
             {"status": "success"},
-            {"rows": [{"id": 77, "username": "demo.user"}]},
+            {"rows": [{"id": 77, "username": "d.user"}]},
         ],
     )
-    assert client.apply(payload) == "asset_id=55;assigned:demo.user"
+    assert client.apply(payload, owner_username="d.user") == "asset_id=55;assigned:d.user"
     assert not any(call[1].endswith("/checkin") for call in client.calls)
 
 

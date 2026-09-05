@@ -7,7 +7,6 @@ import httpx
 from . import __version__
 from .config import SnipeITConfig
 from .errors import PermanentProcessingError, TemporaryProcessingError
-from .policy import disposition
 
 
 class SnipeITClient:
@@ -49,7 +48,22 @@ class SnipeITClient:
         except ValueError as exc:
             raise TemporaryProcessingError("Snipe-IT returned invalid JSON") from exc
 
-    def apply_inventory(self, payload: dict) -> str:
+    def list_assets(self) -> list[dict]:
+        rows: list[dict] = []
+        offset, limit = 0, 100
+        while True:
+            page = self._request(
+                "GET", self.config.hardware_list_endpoint, params={"limit": limit, "offset": offset}
+            )
+            current = page.get("rows") or []
+            rows.extend(current)
+            total = page.get("total")
+            if not current or len(current) < limit or (isinstance(total, int) and len(rows) >= total):
+                break
+            offset += len(current)
+        return rows
+
+    def apply_inventory(self, payload: dict, owner_username: str | None = None) -> str:
         serial = payload["serial_number"]
         lookup = self._request(
             "GET", self.config.inventory_endpoint.format(serial=quote(serial, safe=""))
@@ -65,6 +79,10 @@ class SnipeITClient:
             for logical, handle in self.config.custom_field_map.items()
             if logical in inventory.get("custom_fields", {})
         }
+        if handle := self.config.custom_field_map.get("last_success"):
+            custom_values[handle] = payload.get("observed_at")
+        if handle := self.config.custom_field_map.get("agent_version"):
+            custom_values.setdefault(handle, (payload.get("agent") or {}).get("version", ""))
         if not rows:
             create = {
                 "name": inventory.get("name", payload["computer_name"]),
@@ -91,16 +109,9 @@ class SnipeITClient:
         )
         if result.get("status") == "error":
             raise PermanentProcessingError("Snipe-IT application error")
-        requested, username = disposition(payload["identity"])
         assigned = rows[0].get("assigned_to")
-        if requested == "stock" and assigned:
-            self._request(
-                "POST",
-                self.config.checkin_endpoint.format(asset_id=asset_id),
-                json={"note": "Authoritative directory disabled state"},
-            )
-            return f"asset_id={asset_id};stock"
-        if requested == "assigned" and username:
+        if owner_username:
+            username = owner_username.lower()
             users = self._request(
                 "GET", self.config.user_search_endpoint, params={"search": username}
             )
@@ -116,7 +127,11 @@ class SnipeITClient:
                 return f"asset_id={asset_id};preserve:identity_unresolved"
             current_id = assigned.get("id") if isinstance(assigned, dict) else None
             if current_id != user_id:
+                previous = ""
                 if assigned:
+                    previous = str(
+                        assigned.get("username") or assigned.get("name") or assigned.get("id") or ""
+                    )
                     self._request(
                         "POST",
                         self.config.checkin_endpoint.format(asset_id=asset_id),
@@ -127,10 +142,11 @@ class SnipeITClient:
                     self.config.checkout_endpoint.format(asset_id=asset_id),
                     json={"checkout_to_type": "user", "assigned_user": user_id},
                 )
+                return f"asset_id={asset_id};owner_changed:{previous}->{username}"
             return f"asset_id={asset_id};assigned:{username}"
         return f"asset_id={asset_id};preserve"
 
-    def apply(self, payload: dict) -> str:
+    def apply(self, payload: dict, owner_username: str | None = None) -> str:
         if payload["event_type"] in {
             "inventory",
             "install_update",
@@ -138,5 +154,5 @@ class SnipeITClient:
             "stock_checkin",
             "offboarding",
         }:
-            return self.apply_inventory(payload)
+            return self.apply_inventory(payload, owner_username)
         raise PermanentProcessingError("unsupported event type")

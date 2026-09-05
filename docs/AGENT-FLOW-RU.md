@@ -6,11 +6,11 @@
 
 Пример конфигурации: [`agent/config.example.json`](../agent/config.example.json)
 
-![Принцип работы SnipeIT Inventory Gateway](agent-flow.png)
+![Принцип доставки SnipeIT Inventory Gateway](mail-delivery-figma.png)
 
-Схема загружена прямо в репозиторий. Векторная версия:
-[`docs/agent-flow.svg`](agent-flow.svg). Она отражает тот же поток, что и код
-агента и серверных служб.
+Я храню экспорт схемы прямо в репозитории: [PNG](mail-delivery-figma.png) и
+[SVG](mail-delivery-figma.svg). Редактируемый оригинал находится
+[в Figma/FigJam](https://www.figma.com/board/lC8wdiuqwkBqjs2yGzhR2x).
 
 ## Что уже собрано
 
@@ -70,7 +70,7 @@ Serial number, имя пользователя, характеристики П�
 ```text
 POST https://inventory-gateway.example.com:2443/api/v1/events
 Content-Type: application/json
-User-Agent: SnipeIT-Inventory-Agent/1.0.0
+User-Agent: SnipeIT-Inventory-Gateway/1.0.0
 Timeout: 20 seconds
 ```
 
@@ -88,8 +88,8 @@ SQLite queue. Повторный HTTPS/SMTP экземпляр с тем же `e
 ```text
 From: notification@example.com
 To: inventory@example.com
-Subject: [SNIPEIT-INVENTORY] RELAY: COMPUTER EVENT_ID_PREFIX
-Header: X-SnipeIT-Relay: 1
+Subject: [SnipeIT Inventory Gateway][RELAY] COMPUTER - event EVENT_ID_PREFIX
+Headers: X-SnipeIT-Relay: 1; X-SnipeIT-Category: relay; X-SnipeIT-Mail-Class: transport
 Attachment: EVENT_ID.snipeit-event.json
 ```
 
@@ -104,11 +104,11 @@ Attachment: EVENT_ID.snipeit-event.json
 На сервере IMAP collector читает `inventory@example.com`, локально декодирует MIME
 Subject, проверяет отправителя, заголовок и ровно одно проектное вложение.
 Envelope поступает в ту же SQLite queue, что и HTTPS. После inline-обработки
-письмо перемещается ровно в один результат:
-
-- `Processed Events` — успех или уже обработанный дубликат;
-- `Offline Relay` — временная ошибка, письмо будет повторно проверено;
-- `Rejected Events` — окончательная ошибка схемы, подписи или обработки.
+письмо перемещается ровно в один результат: успех или обработанный дубликат —
+`Reports`; временная или окончательная ошибка — `Errors`. Читаемое письмо
+`[ERROR]` содержит идентификатор события, компьютер, итог и безопасный текст
+ошибки. Повторы и dead-letter остаются в SQLite, поэтому отдельная IMAP-папка
+очереди не нужна.
 
 Посторонняя почта не перемещается.
 
@@ -129,7 +129,8 @@ Envelope поступает в ту же SQLite queue, что и HTTPS. Посл
 
 `StatePath` содержит последний event ID, канал доставки и размер очереди.
 `LogPath` хранит локальный технический лог без inventory payload и секретов;
-при размере 2 MiB агент оставляет одну предыдущую копию. Lock-файл блокирует
+при размере 2 MiB агент ротирует до пяти архивов: `agent.log.1` является самым
+свежим, `agent.log.5` — самым старым и удаляется при следующей ротации. Lock-файл блокирует
 параллельные ручные и плановые запуски.
 
 ## Что делает Gateway
@@ -137,10 +138,13 @@ Envelope поступает в ту же SQLite queue, что и HTTPS. Посл
 1. HTTPS API или IMAP collector проверяет и декодирует envelope.
 2. Durable SQLite queue выполняет дедупликацию, lease, retry/backoff и
    dead-letter. Watermark не даёт старому поколению перезаписать новое.
-3. Worker ищет asset по serial number, создаёт или обновляет только разрешённые
+3. Worker проверяет формат учётной записи и накапливает три подтверждения
+   нового владельца минимум за 24 часа. Пустое или меняющееся имя не меняет
+   текущего владельца.
+4. Worker ищет asset по serial number, создаёт или обновляет только разрешённые
    поля и применяет server-side mapping custom fields.
-4. Только Gateway использует локальный Snipe-IT API token.
-5. Dead-letter, восстановление и weekly health отправляются с
+5. Только Gateway использует локальный Snipe-IT API token.
+6. Dead-letter, восстановление, отчёты по компьютерам и еженедельная сводка отправляются с
    `notification@example.com` на `inventory@example.com`.
 
 Итоговая модель доставки: **at-least-once transport + idempotent server-side
@@ -173,7 +177,7 @@ $smtp = Get-Credential -UserName notification@example.com
 
 Установщик проверяет URL/ключ/JSON, создаёт защищённые каталоги в `ProgramData`,
 делает encrypted-event dry-run и регистрирует задачу
-`\ExampleOrg\SnipeIT Inventory Collection` от `SYSTEM`: через 2 минуты после
+`\example-org\SnipeIT Inventory Gateway` от `SYSTEM`: через 2 минуты после
 старта, через 5 минут после входа пользователя и ежедневно со случайной
 задержкой. Обновление сохраняет предыдущий скрипт для `rollback-agent.ps1`.
 `uninstall-agent.ps1` по умолчанию сохраняет config, ключи, логи и очередь;

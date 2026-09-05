@@ -1,8 +1,9 @@
 # Архитектура SnipeIT Inventory Gateway v1.0.0
 
 Подробный поток Windows-агента и доставки показан в
-[`AGENT-FLOW-RU.md`](AGENT-FLOW-RU.md) и на
-[`визуальной SVG-схеме`](agent-flow.svg).
+[`AGENT-FLOW-RU.md`](AGENT-FLOW-RU.md), на
+[визуальной SVG-схеме](mail-delivery-figma.svg) и в
+[редактируемом оригинале Figma/FigJam](https://www.figma.com/board/lC8wdiuqwkBqjs2yGzhR2x).
 
 ## Граница доверия
 
@@ -26,9 +27,9 @@ Windows Agent ── SMTP ─> IMAP ┘
 очередь 30 днями/200 файлами. В локальной очереди нет plaintext inventory.
 
 Nginx принимает только `POST /api/v1/events`; остальные URI получают 404.
-пограничный firewall публикует WAN:2443 → 192.0.2.10:2443. Snipe-IT/Apache продолжает
+UserGate публикует WAN:2443 → 192.0.2.202:2443. Snipe-IT/Apache продолжает
 слушать 443. Split DNS для `inventory-gateway.example.com`: внутри
-`192.0.2.10`, снаружи — публичный адрес пограничный firewall.
+`192.0.2.202`, снаружи — публичный адрес UserGate.
 
 ## Криптопротокол
 
@@ -59,39 +60,40 @@ Lease позволяет подобрать событие после паден
 обновляют только allowlisted поля. Логические custom fields переводятся в
 server-side Snipe-IT handles через строгий `custom_field_map`.
 
-Gateway нормализует обнаруженный username, отбрасывает системные/служебные
-учётки и ищет ровно одно точное совпадение в Snipe-IT. Только после этого
-выполняется checkout. Endpoint не считается источником истины для disabled или
-offboarding-состояния и не может инициировать check-in; вывод актива в запас
-должен запускаться отдельным серверным процессом на основании каталога.
+Gateway нормализует обнаруженный username и принимает только стандартный
+формат `инициал.фамилия` либо исключение из закрытого config. Новый владелец
+должен повториться в трёх разных событиях минимум за 24 часа. Другое имя
+сбрасывает кандидата, а пустое имя всегда означает `preserve`. После
+подтверждения Gateway ищет ровно одно точное совпадение в Snipe-IT и только
+тогда выполняет checkout. Подробный автомат описан в
+[OWNERSHIP-SAFETY-RU.md](OWNERSHIP-SAFETY-RU.md).
 
 ## Почта
 
-Collector декодирует MIME Subject локально. Приоритет классификации строго:
-relay → weekly → error → warning → alert → report. Письмо попадает ровно в одну
-папку, а unrelated остаётся в исходной папке.
+Collector декодирует MIME Subject локально и проверяет служебную категорию,
+класс письма, отдельные SMTP/IMAP identities и единственного получателя. Relay
+всегда имеет высший приоритет. Письмо попадает ровно в одну папку, а unrelated
+остаётся в исходной папке.
 
 ```text
 SnipeIT Inventory/
-  ! Weekly Reports
-  Alerts
-  Errors
-  Offline Relay
-  Processed Events
-  Rejected Events
   Reports
-  Warnings
+  Weekly Reports
+  Errors
 ```
 
-Новый relay требует разрешённого From, точного subject prefix,
-`X-SnipeIT-Relay: 1` и ровно одного `.snipeit-event.json`. После ingest событие
-обрабатывается inline в том же проходе: успех → Processed, временная ошибка →
-Offline Relay, окончательная → Rejected. Совместимые темы:
-`[SNIPEIT-RELAY]`, `[PCINV-REPORT]`, `[PCINV-ALERT]`, `PC Inventory ...`.
+Новый relay требует точных From/To, метки `[RELAY]`, заголовков
+`X-SnipeIT-Relay: 1` и `X-SnipeIT-Mail-Class: transport`, а также ровно одного
+`.snipeit-event.json`. После ingest событие обрабатывается inline в том же
+проходе: успех → `Reports`, временная или окончательная ошибка → `Errors` с
+отдельным читаемым error report. Retry/dead-letter хранит SQLite, а не IMAP.
+Старые зашифрованные relay-письма продолжают обрабатываться; старые отчёты
+перемещаются в Trash. Полные правила описаны в
+[MAIL-REPORTS-RU.md](MAIL-REPORTS-RU.md).
 
 ## Наблюдаемость
 
 Dead-letter уведомляется немедленно. Повторяющиеся ошибки IMAP/очереди
-throttle-ятся, восстановление отправляет отдельное письмо. Недельный health
-report запускается systemd timer. Исходящие сообщения: только
+throttle-ятся, восстановление отправляет отдельное письмо. Брендированный
+недельный отчёт по всем компьютерам запускается systemd timer. Исходящие сообщения: только
 `notification@example.com` → `inventory@example.com`, `smtp.example.com:587`, STARTTLS.

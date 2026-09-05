@@ -10,7 +10,7 @@ class Client:
     def __init__(self, outcome):
         self.outcome = outcome
 
-    def apply(self, payload):
+    def apply(self, payload, owner_username=None):
         if isinstance(self.outcome, Exception):
             raise self.outcome
         return self.outcome
@@ -19,6 +19,12 @@ class Client:
 class Notifier:
     def incident(self, *args):
         return None
+
+    def computer(self, *args):
+        return True
+
+    def owner_change(self, *args):
+        return True
 
 
 def raw_mail(envelope):
@@ -55,7 +61,7 @@ def test_smtp_temporary_error_routes_offline_relay(config, envelope):
         Notifier(),
         raw_mail(envelope),
     )
-    assert route == "relay" and queue.counts() == {"retry": 1}
+    assert route == "error" and queue.counts() == {"retry": 1}
     queue.close()
 
 

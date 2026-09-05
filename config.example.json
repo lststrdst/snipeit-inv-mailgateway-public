@@ -30,6 +30,7 @@
     "verify_tls": false,
     "timeout_seconds": 30,
     "inventory_endpoint": "/api/v1/hardware/byserial/{serial}",
+    "hardware_list_endpoint": "/api/v1/hardware",
     "create_endpoint": "/api/v1/hardware",
     "update_endpoint": "/api/v1/hardware/{asset_id}",
     "user_search_endpoint": "/api/v1/users",
@@ -42,7 +43,9 @@
       "cpu": "_snipeit_example_cpu_2",
       "os": "_snipeit_example_os_3",
       "disks": "_snipeit_example_storage_4",
-      "agent_version": "_snipeit_example_agent_version_5"
+      "agent_version": "_snipeit_example_agent_5",
+      "last_success": "_snipeit_example_success_6",
+      "last_error": "_snipeit_example_error_7"
     }
   },
   "imap": {
@@ -52,6 +55,8 @@
     "password": "",
     "inbox": "INBOX",
     "parent_folder": "SnipeIT Inventory",
+    "folder_separator": "/",
+    "trash_folder": "Trash",
     "allowed_from": ["notification@example.com"],
     "max_messages_per_run": 200,
     "max_message_bytes": 2097152,
@@ -69,6 +74,18 @@
   "notifications": {
     "throttle_seconds": 3600,
     "weekly_weekday": 0,
-    "weekly_hour": 9
+    "weekly_hour": 9,
+    "timezone": "Europe/Moscow",
+    "weekly_stale_days": 7,
+    "weekly_critical_days": 14,
+    "weekly_category_ids": [1],
+    "weekly_max_rows": 250
+  },
+  "ownership": {
+    "username_pattern": "^[a-z]\\.[a-z]+(?:-[a-z]+)?$",
+    "non_standard_accounts": ["LegacyUserA", "LegacyUserB"],
+    "confirmation_events": 3,
+    "confirmation_hours": 24,
+    "candidate_window_days": 7
   }
 }

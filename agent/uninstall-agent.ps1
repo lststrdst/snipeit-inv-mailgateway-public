@@ -3,8 +3,8 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [string]$InstallRoot = (Join-Path $env:ProgramData 'SnipeIT Inventory Gateway'),
-    [string]$TaskPath = '\ExampleOrg\',
-    [string]$TaskName = 'SnipeIT Inventory Collection',
+    [string]$TaskPath = '\example-org\',
+    [string]$TaskName = 'SnipeIT Inventory Gateway',
     [switch]$PurgeData
 )
 
@@ -25,7 +25,7 @@ if ($PurgeData) {
         $PSCmdlet.ShouldProcess($resolved, 'Permanently delete agent, config, keys, queue and logs')) {
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
-    Write-Output 'Agent task and all local data removed.'
+    Write-Output 'SnipeIT Inventory Gateway task and all local data removed.'
     return
 }
 
@@ -34,4 +34,4 @@ if ((Test-Path -LiteralPath $agentFile -PathType Leaf) -and
     $PSCmdlet.ShouldProcess($agentFile, 'Remove executable while preserving config and queued events')) {
     Remove-Item -LiteralPath $agentFile -Force
 }
-Write-Output 'Agent task removed. Config, keys, queue and logs were preserved.'
+Write-Output 'SnipeIT Inventory Gateway task removed. Config, keys, queue and logs were preserved.'

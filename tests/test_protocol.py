@@ -9,7 +9,7 @@ from snipeit_inventory_gateway.protocol import decode_event, encode_event
 
 def test_round_trip_encrypts_sensitive_inventory(config, payload, envelope):
     raw = json.dumps(envelope).encode()
-    assert b"SERIAL-001" not in raw and b"demo.user" not in raw
+    assert b"SERIAL-001" not in raw and b"d.user" not in raw
     decoded = decode_event(raw, config, enforce_freshness=True)
     assert decoded.payload["serial_number"] == "SERIAL-001"
 

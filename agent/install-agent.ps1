@@ -9,8 +9,8 @@ param(
     [switch]$NoSmtpFallback,
     [switch]$SkipScheduledTask,
     [string]$InstallRoot = (Join-Path $env:ProgramData 'SnipeIT Inventory Gateway'),
-    [string]$TaskPath = '\ExampleOrg\',
-    [string]$TaskName = 'SnipeIT Inventory Collection'
+    [string]$TaskPath = '\example-org\',
+    [string]$TaskName = 'SnipeIT Inventory Gateway'
 )
 
 Set-StrictMode -Version Latest
@@ -41,7 +41,7 @@ function Assert-MasterKey {
 function Protect-SmtpCredential {
     param([PSCredential]$Credential, [string]$Destination, [string]$ExpectedUser)
     if ($Credential.UserName.ToLowerInvariant() -ne $ExpectedUser.ToLowerInvariant()) {
-        throw 'SMTP credential username must match MailFrom in agent config'
+        throw 'SMTP credential username must match MailFrom in the agent config'
     }
     $entropy = [Text.Encoding]::UTF8.GetBytes('SnipeIT Inventory Gateway SMTP credential v1')
     [byte[]]$plainBytes = $null
@@ -123,7 +123,7 @@ foreach ($path in @($InstallRoot, $configDirectory, $stateDirectory, $queueDirec
     }
 }
 
-if ($PSCmdlet.ShouldProcess($InstallRoot, "Install SnipeIT Inventory Agent v$agentVersion")) {
+if ($PSCmdlet.ShouldProcess($InstallRoot, "Install SnipeIT Inventory Gateway v$agentVersion")) {
     if (Test-Path -LiteralPath $agentTarget -PathType Leaf) {
         Copy-Item -LiteralPath $agentTarget -Destination $previousTarget -Force
     }
@@ -132,7 +132,7 @@ if ($PSCmdlet.ShouldProcess($InstallRoot, "Install SnipeIT Inventory Agent v$age
 
     $smtpEnabled = $false
     if ($null -ne $SmtpCredential) {
-        Protect-SmtpCredential -Credential $SmtpCredential -Destination $credentialTarget -ExpectedUser $settings.MailFrom
+        Protect-SmtpCredential -Credential $SmtpCredential -Destination $credentialTarget -ExpectedUser ([string]$settings.MailFrom)
         $smtpEnabled = $true
     } elseif (-not $NoSmtpFallback -and (Test-Path -LiteralPath $credentialTarget -PathType Leaf)) {
         $smtpEnabled = $true
@@ -191,9 +191,9 @@ if (-not $SkipScheduledTask -and $PSCmdlet.ShouldProcess("$TaskPath$TaskName", '
         -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $action `
         -Trigger @($startup, $logon, $daily) -Principal $principal -Settings $taskSettings `
-        -Description "SnipeIT Inventory Agent v${agentVersion}: encrypted HTTPS with SMTP fallback" `
+        -Description "SnipeIT Inventory Gateway v${agentVersion}" `
         -Force | Out-Null
 }
 
-Write-Output "SnipeIT Inventory Agent v$agentVersion installed in $InstallRoot"
+Write-Output "SnipeIT Inventory Gateway v$agentVersion installed in $InstallRoot"
 Write-Output "Scheduled task: $TaskPath$TaskName"

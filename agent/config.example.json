@@ -12,5 +12,6 @@
   "StatePath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\State\\state.json",
   "QueuePath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\Queue",
   "LogPath": "C:\\ProgramData\\SnipeIT Inventory Gateway\\Logs\\agent.log",
+  "NonStandardAccounts": ["LegacyUserA", "LegacyUserB"],
   "MaxQueueAttemptsPerRun": 10
 }

@@ -30,6 +30,13 @@ def test_agent_has_local_retry_queue_and_no_snipe_or_ssh_secret():
     assert "SnipeITToken" not in agent and "IdentityFile" not in agent
 
 
+def test_agent_log_rotation_is_capped_at_five_archives():
+    agent = (ROOT / "agent/SnipeIT.Inventory.Agent.ps1").read_text()
+    assert '$oldestArchive = "${path}.5"' in agent
+    assert "for ($archiveIndex = 4; $archiveIndex -ge 1; $archiveIndex--)" in agent
+    assert 'Move-Item -LiteralPath $path -Destination "${path}.1" -Force' in agent
+
+
 def test_agent_install_is_system_scheduled_and_uses_machine_dpapi():
     installer = (ROOT / "agent/install-agent.ps1").read_text()
     assert "DataProtectionScope]::LocalMachine" in installer
@@ -38,6 +45,9 @@ def test_agent_install_is_system_scheduled_and_uses_machine_dpapi():
     assert "New-ScheduledTaskTrigger -Daily" in installer
     assert "Get-Credential" not in installer
     assert "Password =" not in installer
+    assert "[string]$TaskName = 'SnipeIT Inventory Gateway'" in installer
+    assert '-Description "SnipeIT Inventory Gateway v${agentVersion}"' in installer
+    assert "Inventory " + "Collection" not in installer
 
 
 def test_agent_uninstall_preserves_queue_by_default_and_guards_purge():

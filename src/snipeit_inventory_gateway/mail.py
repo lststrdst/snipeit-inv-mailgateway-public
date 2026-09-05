@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import email
 import imaplib
 import logging
@@ -9,6 +10,7 @@ from email.message import Message
 
 from .config import GatewayConfig
 from .errors import AuthenticationError, ValidationError
+from .mail_contract import PRODUCT, subject_matches_category
 from .notifications import Notifier
 from .protocol import decode_event
 from .queue import EventQueue
@@ -17,15 +19,49 @@ from .worker import process_item
 
 LOG = logging.getLogger(__name__)
 FOLDERS = {
-    "weekly": "! Weekly Reports",
-    "alert": "Alerts",
-    "error": "Errors",
-    "relay": "Offline Relay",
-    "processed": "Processed Events",
-    "rejected": "Rejected Events",
     "report": "Reports",
-    "warning": "Warnings",
+    "weekly": "Weekly Reports",
+    "owner_change": "Reports",
+    "warning": "Errors",
+    "alert": "Errors",
+    "error": "Errors",
+    "relay": "Errors",
+    "processed": "Reports",
+    "rejected": "Errors",
 }
+LEGACY_REPORT_FOLDERS = (
+    "SnipeIT Inventory/! Weekly Reports",
+    "SnipeIT Inventory/Alerts",
+    "SnipeIT Inventory/Errors",
+    "SnipeIT Inventory/Reports",
+    "SnipeIT Inventory/Warnings",
+    "SnipeIT Inventory/Processed Events",
+    "SnipeIT Inventory/Rejected Events",
+)
+LEGACY_RELAY_FOLDER = "SnipeIT Inventory/Offline Relay"
+
+
+def imap_mailbox(value: str) -> str:
+    """Encode Unicode mailbox names using IMAP modified UTF-7."""
+    output: list[str] = []
+    pending: list[str] = []
+
+    def flush() -> None:
+        if not pending:
+            return
+        raw = "".join(pending).encode("utf-16-be")
+        output.append("&" + base64.b64encode(raw).decode().rstrip("=").replace("/", ",") + "-")
+        pending.clear()
+
+    for character in value:
+        if " " <= character <= "~":
+            flush()
+            output.append("&-" if character == "&" else character)
+        else:
+            pending.append(character)
+    flush()
+    encoded = "".join(output)
+    return '"' + encoded.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def decoded_subject(message: Message) -> str:
@@ -37,6 +73,11 @@ def decoded_subject(message: Message) -> str:
 
 def sender_address(message: Message) -> str:
     return email.utils.parseaddr(message.get("From", ""))[1].lower()
+
+
+def recipient_addresses(message: Message) -> list[str]:
+    values = [*(message.get_all("To", []) or []), *(message.get_all("Cc", []) or [])]
+    return [address.lower() for _, address in email.utils.getaddresses(values) if address]
 
 
 def encrypted_attachment(message: Message) -> bytes:
@@ -53,27 +94,54 @@ def encrypted_attachment(message: Message) -> bytes:
     return matches[0]
 
 
-def classify(message: Message, allowed_from: list[str]) -> str | None:
-    """Fixed priority: relay > weekly > error > warning > alert > report."""
+def classify(message: Message, allowed_from: list[str], expected_to: str) -> str | None:
+    """Classify only authenticated project mail; unrelated INBOX mail stays untouched."""
     subject = decoded_subject(message)
     upper = subject.upper()
     sender_ok = sender_address(message) in {value.lower() for value in allowed_from}
+    recipients = recipient_addresses(message)
+    recipient_ok = len(recipients) == 1 and recipients[0] == expected_to.lower()
+    route_ok = sender_ok and recipient_ok
     new_relay = (
-        upper.startswith("[SNIPEIT-INVENTORY] RELAY:") and message.get("X-SnipeIT-Relay") == "1"
+        subject_matches_category(subject, "relay")
+        and message.get("X-SnipeIT-Relay") == "1"
+        and str(message.get("X-SnipeIT-Mail-Class") or "").lower() == "transport"
+    )
+    compatible_relay = (
+        (
+            upper.startswith("[SNIPEIT-INVENTORY] RELAY:")
+            or upper.startswith("[SNIPEIT INVENTORY GATEWAY] РЕЗЕРВНАЯ ДОСТАВКА")
+        )
+        and message.get("X-SnipeIT-Relay") == "1"
     )
     legacy_relay = upper.startswith("[SNIPEIT-RELAY]")
-    if sender_ok and (new_relay or legacy_relay):
+    if route_ok and (new_relay or compatible_relay or legacy_relay):
         try:
             encrypted_attachment(message)
             return "relay"
         except ValidationError:
             return "rejected"
+    category = str(message.get("X-SnipeIT-Category") or "").strip().lower()
+    category_routes = {
+        "computer-report": "report",
+        "weekly-report": "weekly",
+        "owner-change": "owner_change",
+        "warning": "warning",
+        "error": "error",
+        "alert": "alert",
+    }
+    compatible_project_subject = upper.startswith(f"[{PRODUCT}]".upper())
+    if route_ok and category in category_routes:
+        if subject_matches_category(subject, category) or compatible_project_subject:
+            return category_routes[category]
+        return None
+    if upper.startswith("[PCINV-") or upper.startswith("PC INVENTORY "):
+        return "legacy" if route_ok else None
     project = (
         upper.startswith("[SNIPEIT-INVENTORY]")
-        or upper.startswith("[PCINV-")
-        or upper.startswith("PC INVENTORY ")
+        or upper.startswith("[SNIPEIT INVENTORY GATEWAY]")
     )
-    if not project:
+    if not project or not route_ok:
         return None
     if "WEEKLY" in upper:
         return "weekly"
@@ -83,17 +151,21 @@ def classify(message: Message, allowed_from: list[str]) -> str | None:
         return "warning"
     if "ALERT" in upper:
         return "alert"
-    if "REPORT" in upper:
+    if "СМЕНА ПОЛЬЗОВАТЕЛЯ" in upper:
+        return "owner_change"
+    if "ОТЧЁТ ПО КОМПЬЮТЕРУ" in upper or "REPORT" in upper:
         return "report"
     return None
 
 
 def folder_path(config: GatewayConfig, key: str) -> str:
-    return f"{config.imap.parent_folder}/{FOLDERS[key]}"
+    separator = config.imap.folder_separator
+    relative = FOLDERS[key].replace("/", separator)
+    return f"{config.imap.parent_folder}{separator}{relative}"
 
 
 def move_uid(client: imaplib.IMAP4_SSL, uid: bytes, destination: str) -> None:
-    typ, _ = client.uid("COPY", uid, destination)
+    typ, _ = client.uid("COPY", uid, imap_mailbox(destination))
     if typ != "OK":
         raise imaplib.IMAP4.error("COPY failed")
     typ, _ = client.uid("STORE", uid, "+FLAGS.SILENT", r"(\Deleted)")
@@ -103,11 +175,15 @@ def move_uid(client: imaplib.IMAP4_SSL, uid: bytes, destination: str) -> None:
 
 
 def create_folders(client: imaplib.IMAP4_SSL, config: GatewayConfig) -> None:
-    client.create(config.imap.parent_folder)
-    for name in FOLDERS.values():
-        client.create(
-            folder_path(config, next(key for key, value in FOLDERS.items() if value == name))
-        )
+    separator = config.imap.folder_separator
+    names = {config.imap.parent_folder}
+    for relative in set(FOLDERS.values()):
+        current = config.imap.parent_folder
+        for part in relative.split("/"):
+            current = f"{current}{separator}{part}"
+            names.add(current)
+    for name in sorted(names, key=lambda item: (item.count(separator), item)):
+        client.create(imap_mailbox(name))
 
 
 def ingest_message(
@@ -116,7 +192,7 @@ def ingest_message(
     if len(raw) > config.imap.max_message_bytes:
         return "rejected"
     message = email.message_from_bytes(raw)
-    route = classify(message, config.imap.allowed_from)
+    route = classify(message, config.imap.allowed_from, config.imap.user)
     if route != "relay":
         return route
     try:
@@ -146,8 +222,8 @@ def ingest_message(
                 return "processed"
             if result in {"rejected", "dead_letter"}:
                 return "rejected"
-            return "relay"
-    return "relay"
+            return "error"
+    return "error"
 
 
 def collect(config: GatewayConfig, dry_run: bool = False) -> dict[str, int]:
@@ -160,12 +236,18 @@ def collect(config: GatewayConfig, dry_run: bool = False) -> dict[str, int]:
         with imaplib.IMAP4_SSL(config.imap.host, config.imap.port) as imap:
             imap.login(config.imap.user, config.imap.password.get_secret_value())
             create_folders(imap, config)
-            source_folders = [config.imap.inbox, folder_path(config, "relay")]
-            for source in source_folders:
+            source_folders = [
+                (config.imap.inbox, False, False),
+                (LEGACY_RELAY_FOLDER, False, True),
+                *((source, True, True) for source in LEGACY_REPORT_FOLDERS),
+            ]
+            for source, archive_all, optional in source_folders:
                 if scanned >= config.imap.max_messages_per_run:
                     break
-                typ, _ = imap.select(source)
+                typ, _ = imap.select(imap_mailbox(source))
                 if typ != "OK":
+                    if optional:
+                        continue
                     raise imaplib.IMAP4.error(f"cannot select project folder: {source}")
                 typ, data = imap.uid("SEARCH", None, "ALL")
                 if typ != "OK":
@@ -178,20 +260,28 @@ def collect(config: GatewayConfig, dry_run: bool = False) -> dict[str, int]:
                         continue
                     raw = fetched[0][1]
                     if dry_run:
-                        route = classify(email.message_from_bytes(raw), config.imap.allowed_from)
+                        route = classify(
+                            email.message_from_bytes(raw),
+                            config.imap.allowed_from,
+                            config.imap.user,
+                        )
                     else:
                         route = ingest_message(config, queue, snipe, notifier, raw)
+                    if archive_all:
+                        route = "legacy"
                     if route:
                         counts[route] = counts.get(route, 0) + 1
-                        destination = folder_path(config, route)
+                        destination = (
+                            config.imap.trash_folder if route == "legacy" else folder_path(config, route)
+                        )
                         if not dry_run and destination != source:
                             move_uid(imap, uid, destination)
         if notifier:
-            notifier.recovered("imap", "IMAP collector")
+            notifier.recovered("imap", "сборщик резервной почты")
     except (imaplib.IMAP4.error, OSError) as exc:
         if notifier:
             notifier.incident(
-                "imap", "[SNIPEIT-GATEWAY] IMAP ERROR", f"IMAP collector: {type(exc).__name__}"
+                "imap", "Сборщик резервной почты", f"Ошибка IMAP: {type(exc).__name__}"
             )
         raise
     finally:

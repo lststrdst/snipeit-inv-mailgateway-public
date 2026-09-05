@@ -25,18 +25,33 @@
 - Я добавил Nginx configuration, systemd hardening, logrotate, healthcheck,
   backup/restore, installer/update/rollback и миграцию с 1.3.3.
 - Я подготовил русскую документацию, архитектурную схему, unit/integration/
-  security tests, SBOM и release artifacts.
+  security tests и собираемые wheel/source artifacts.
 
 ### Безопасность
 
 - Я не включаю production passwords, tokens, HMAC/AES keys или SSH keys в Git.
 - Перед push я проверяю staged content и историю на секреты.
-- Для публичной редакции я дополнительно удаляю домены, IP, адреса почты,
-  пользователей, внутренние paths/IDs и другие признаки инфраструктуры.
 - После повторного dependency audit я поднял минимальные версии cryptography,
   pytest и installer pip до исправленных веток и повторно проверил окружение.
 - Worker теперь раз в час применяет SQLite retention к обработанным,
   отклонённым и stale-событиям; dead-letter сохраняется для ручного разбора.
+- Windows-агент ограничивает локальную ротацию пятью архивами `agent.log.1`–
+  `agent.log.5` по 2 MiB каждый.
+- Пользовательское имя, Scheduled Task, metadata и User-Agent унифицированы как
+  `SnipeIT Inventory Gateway`.
+- Я добавил строгий формат пользовательских учётных записей и явный список
+  `non_standard_accounts` для `LegacyUserA` и `LegacyUserB`; остальные
+  нестандартные имена не используются для checkout.
+- Я добавил server-side подтверждение владельца: три разных события минимум за
+  24 часа, сброс нестабильного кандидата и полный запрет смены «на никого».
+- Я заменил старые письма русскими HTML-отчётами в стиле EXAMPLE INVENTORY, добавил
+  верхние KPI, русские IMAP-папки и отдельную дедупликацию всех отчётов.
+- Я сократил почтовое дерево до `Reports`, `Weekly Reports` и `Errors`, ввёл
+  стабильные метки тем и запретил смешивать личную, IMAP и SMTP identities.
+- Я потребовал разные пароли сервисных IMAP/SMTP ролей, точный `To` без `Cc` и
+  добавил читаемый error report для временного retry, rejection и dead-letter.
+- Для публичной редакции я дополнительно удаляю домены, IP, адреса почты,
+  пользователей, OU/DN, закрытые paths/IDs и другие признаки инфраструктуры.
 
 ### Известные ограничения
 

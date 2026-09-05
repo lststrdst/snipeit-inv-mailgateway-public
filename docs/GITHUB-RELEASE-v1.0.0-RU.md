@@ -23,9 +23,13 @@ HTTPS ingest и IMAP collector кладут события в одну durable S
 - узкий HTTPS endpoint, Nginx TLS/size/rate/connection limits;
 - SMTP/IMAP fallback и MIME classifier, который не трогает unrelated mail;
 - SQLite WAL queue, lease recovery, retry/backoff, dead-letter и retention;
-- server-side asset create/update, check-in/checkout и exact-user policy;
-- notifications о dead-letter, повторяющихся ошибках, восстановлении и weekly
-  health;
+- server-side asset create/update, check-in/checkout, строгий формат username и
+  подтверждение нового владельца тремя событиями минимум за 24 часа;
+- защита от смены владельца «на никого», ежедневного перескакивания и повторных
+  писем;
+- русские брендированные отчёты EXAMPLE INVENTORY, верхние KPI и понятные IMAP-папки;
+- уведомления о dead-letter, повторяющихся ошибках, восстановлении и
+  еженедельная сводка по всем компьютерам;
 - systemd hardening, logrotate, backup/restore, install/update/rollback;
 - migration dry-run с 1.3.3;
 - русская документация, архитектурная схема, unit/integration/security tests,
@@ -51,6 +55,9 @@ canary на тестовом asset. Порядок установки, backup, r
 `docs/OPERATIONS-RU.md`; production gates — в `docs/READINESS-RU.md`.
 
 ## Известные ограничения
+
+Это активная разработка и release candidate, а не обещание готового
+production-развёртывания.
 
 - Перед production нужно сверить model/status IDs и custom field handles своей
   Snipe-IT instance.

@@ -10,8 +10,8 @@ def write_config(config, path):
     for key in raw["keys"]:
         key["master_key"] = "base64:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
     raw["snipeit"]["api_token"] = "test-token"  # pragma: allowlist secret
-    raw["imap"]["password"] = "test-password"  # pragma: allowlist secret
-    raw["smtp"]["password"] = "test-password"  # pragma: allowlist secret
+    raw["imap"]["password"] = "test-imap-password"  # pragma: allowlist secret
+    raw["smtp"]["password"] = "test-smtp-password"  # pragma: allowlist secret
     path.write_text(json.dumps(raw), encoding="utf-8")
 
 

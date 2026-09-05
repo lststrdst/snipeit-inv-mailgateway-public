@@ -25,6 +25,14 @@ class QueueItem:
     attempts: int
 
 
+@dataclass(frozen=True)
+class OwnerDecision:
+    username: str | None
+    state: str
+    confirmations: int = 0
+    first_seen_at: str | None = None
+
+
 class EventQueue:
     TERMINAL = {"processed", "rejected", "dead_letter", "stale"}
 
@@ -62,8 +70,136 @@ class EventQueue:
           notification_key TEXT PRIMARY KEY, first_failure_at TEXT, last_failure_at TEXT,
           last_sent_at TEXT, recovered_at TEXT, occurrences INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS owner_candidates(
+          computer_name TEXT PRIMARY KEY, confirmed_username TEXT,
+          candidate_username TEXT, first_seen_at TEXT, last_seen_at TEXT,
+          confirmations INTEGER NOT NULL DEFAULT 0, last_event_id TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS report_delivery(
+          dedupe_key TEXT PRIMARY KEY, content_hash TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('reserved','sent')),
+          subject TEXT NOT NULL, reserved_at TEXT NOT NULL, sent_at TEXT
+        );
         INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(1,datetime('now'));
+        INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(2,datetime('now'));
         """)
+
+    def decide_owner(
+        self,
+        computer_name: str,
+        proposed_username: str | None,
+        observed_at: str,
+        event_id: str,
+        required_events: int,
+        required_hours: int,
+        window_days: int,
+    ) -> OwnerDecision:
+        """Confirm a new owner only after distinct, stable observations.
+
+        An empty or invalid proposal is deliberately a no-op: it can never check an
+        asset in or erase the last confirmed owner.
+        """
+        if not proposed_username:
+            return OwnerDecision(None, "preserve_missing")
+        username = proposed_username.lower()
+        observed = dt.datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=dt.UTC)
+        observed = observed.astimezone(dt.UTC)
+        timestamp = now()
+        with self.db:
+            row = self.db.execute(
+                "SELECT * FROM owner_candidates WHERE computer_name=?", (computer_name,)
+            ).fetchone()
+            if row and row["confirmed_username"] == username:
+                self.db.execute(
+                    """UPDATE owner_candidates SET candidate_username=?,first_seen_at=?,last_seen_at=?,
+                       confirmations=1,last_event_id=?,updated_at=? WHERE computer_name=?""",
+                    (
+                        username,
+                        observed.isoformat(),
+                        observed.isoformat(),
+                        event_id,
+                        timestamp,
+                        computer_name,
+                    ),
+                )
+                return OwnerDecision(username, "confirmed_existing", 1, observed.isoformat())
+            reset = not row or row["candidate_username"] != username
+            if row and row["first_seen_at"]:
+                first_existing = dt.datetime.fromisoformat(row["first_seen_at"])
+                reset = reset or observed - first_existing > dt.timedelta(days=window_days)
+            if reset:
+                confirmed = row["confirmed_username"] if row else None
+                self.db.execute(
+                    """INSERT INTO owner_candidates(computer_name,confirmed_username,candidate_username,
+                       first_seen_at,last_seen_at,confirmations,last_event_id,updated_at)
+                       VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(computer_name) DO UPDATE SET
+                       candidate_username=excluded.candidate_username,first_seen_at=excluded.first_seen_at,
+                       last_seen_at=excluded.last_seen_at,confirmations=1,last_event_id=excluded.last_event_id,
+                       updated_at=excluded.updated_at""",
+                    (
+                        computer_name,
+                        confirmed,
+                        username,
+                        observed.isoformat(),
+                        observed.isoformat(),
+                        event_id,
+                        timestamp,
+                    ),
+                )
+                return OwnerDecision(None, "pending", 1, observed.isoformat())
+            confirmations = int(row["confirmations"])
+            if row["last_event_id"] != event_id:
+                confirmations += 1
+            first_seen = dt.datetime.fromisoformat(row["first_seen_at"])
+            self.db.execute(
+                """UPDATE owner_candidates SET last_seen_at=?,confirmations=?,last_event_id=?,updated_at=?
+                   WHERE computer_name=?""",
+                (observed.isoformat(), confirmations, event_id, timestamp, computer_name),
+            )
+            old_enough = observed - first_seen >= dt.timedelta(hours=required_hours)
+            if confirmations >= required_events and old_enough:
+                self.db.execute(
+                    "UPDATE owner_candidates SET confirmed_username=?,updated_at=? WHERE computer_name=?",
+                    (username, timestamp, computer_name),
+                )
+                return OwnerDecision(username, "confirmed_new", confirmations, first_seen.isoformat())
+            return OwnerDecision(None, "pending", confirmations, first_seen.isoformat())
+
+    def reserve_report(self, dedupe_key: str, content_hash: str, subject: str) -> bool:
+        with self.db:
+            row = self.db.execute(
+                "SELECT content_hash,status,reserved_at FROM report_delivery WHERE dedupe_key=?",
+                (dedupe_key,),
+            ).fetchone()
+            if row and row["content_hash"] == content_hash:
+                if row["status"] == "sent":
+                    return False
+                reserved = dt.datetime.fromisoformat(row["reserved_at"])
+                if dt.datetime.now(dt.UTC) - reserved < dt.timedelta(minutes=15):
+                    return False
+            self.db.execute(
+                """INSERT INTO report_delivery(dedupe_key,content_hash,status,subject,reserved_at,sent_at)
+                   VALUES(?,?,'reserved',?,?,NULL) ON CONFLICT(dedupe_key) DO UPDATE SET
+                   content_hash=excluded.content_hash,status='reserved',subject=excluded.subject,
+                   reserved_at=excluded.reserved_at,sent_at=NULL""",
+                (dedupe_key, content_hash, subject, now()),
+            )
+        return True
+
+    def finish_report(self, dedupe_key: str, content_hash: str, sent: bool) -> None:
+        if sent:
+            self.db.execute(
+                "UPDATE report_delivery SET status='sent',sent_at=? WHERE dedupe_key=? AND content_hash=?",
+                (now(), dedupe_key, content_hash),
+            )
+        else:
+            self.db.execute(
+                "DELETE FROM report_delivery WHERE dedupe_key=? AND content_hash=? AND status='reserved'",
+                (dedupe_key, content_hash),
+            )
 
     def enqueue(self, event: DecodedEvent, source: str) -> tuple[str, bool]:
         timestamp = now()

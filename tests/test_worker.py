@@ -11,7 +11,7 @@ class FakeClient:
     def __init__(self, outcome):
         self.outcome = outcome
 
-    def apply(self, payload):
+    def apply(self, payload, owner_username=None):
         if isinstance(self.outcome, Exception):
             raise self.outcome
         return self.outcome
@@ -23,6 +23,12 @@ class FakeNotifier:
 
     def incident(self, *args):
         self.incidents.append(args)
+
+    def computer(self, *args):
+        return True
+
+    def owner_change(self, *args):
+        return True
 
 
 def claimed(config, envelope):
@@ -41,10 +47,25 @@ def test_success_applies_watermark(config, envelope):
 
 def test_permanent_error_is_rejected(config, envelope):
     queue, item = claimed(config, envelope)
+    notifier = FakeNotifier()
     result = process_item(
-        config, queue, FakeClient(PermanentProcessingError("bad asset")), FakeNotifier(), item
+        config, queue, FakeClient(PermanentProcessingError("bad asset")), notifier, item
     )
     assert result == "rejected" and queue.status(item.event_id) == "rejected"
+    assert len(notifier.incidents) == 1
+    assert "окончательный отказ" in notifier.incidents[0][2]
+    queue.close()
+
+
+def test_temporary_error_reports_safe_retry_details(config, envelope):
+    config.queue.max_attempts = 3
+    queue, item = claimed(config, envelope)
+    notifier = FakeNotifier()
+    result = process_item(
+        config, queue, FakeClient(TemporaryProcessingError("Snipe-IT unavailable")), notifier, item
+    )
+    assert result == "retry"
+    assert "будет повтор" in notifier.incidents[0][2]
     queue.close()
 
 

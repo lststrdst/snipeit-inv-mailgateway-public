@@ -3,8 +3,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$InstallRoot = (Join-Path $env:ProgramData 'SnipeIT Inventory Gateway'),
-    [string]$TaskPath = '\ExampleOrg\',
-    [string]$TaskName = 'SnipeIT Inventory Collection'
+    [string]$TaskPath = '\example-org\',
+    [string]$TaskName = 'SnipeIT Inventory Gateway'
 )
 
 Set-StrictMode -Version Latest
@@ -31,4 +31,4 @@ if ($PSCmdlet.ShouldProcess($agentFile, 'Restore previous agent and validate it'
     if ($null -ne $task) { Enable-ScheduledTask -InputObject $task | Out-Null }
 }
 
-Write-Output 'Previous SnipeIT Inventory Agent restored and validated.'
+Write-Output 'Previous SnipeIT Inventory Gateway version restored and validated.'

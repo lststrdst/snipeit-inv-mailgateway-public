@@ -40,7 +40,7 @@ Nginx и не читает содержимое событий из production I
 ## Установка и переключение
 
 После подтверждения: установить unit/nginx/logrotate, проверить `nginx -t`,
-включить API/worker/timers и отдельно настроить пограничный firewall NAT/DNS. Installer сам
+включить API/worker/timers и отдельно настроить UserGate NAT/DNS. Installer сам
 не включает и не запускает сервисы.
 
 ```bash
@@ -92,6 +92,32 @@ $smtp = Get-Credential -UserName notification@example.com
 `allowed_computers: ["LAPTOP-001"]`. Для пилота без почтового fallback можно
 явно использовать `-NoSmtpFallback`; недоставленные события останутся в
 зашифрованной локальной очереди.
+
+Исключения из стандартного формата `инициал.фамилия` указываются одинаково в
+закрытых конфигурациях агента и Gateway:
+
+```json
+// private agent config
+"NonStandardAccounts": ["LegacyUserA", "LegacyUserB"]
+
+// private Gateway config
+"ownership": {
+  "non_standard_accounts": ["LegacyUserA", "LegacyUserB"],
+  "confirmation_events": 3,
+  "confirmation_hours": 24,
+  "candidate_window_days": 7
+}
+```
+
+После обновления weekly custom fields и IMAP-папок проверяются командами:
+
+```bash
+snipeit-inventory-gateway check-config
+snipeit-inventory-gateway collect-mail --dry-run
+snipeit-inventory-gateway weekly-report
+```
+
+Повторный запуск `weekly-report` в ту же ISO-неделю не отправляет дубль.
 
 Для GPO installer запускается startup-script от `SYSTEM`. Не помещайте пароль
 SMTP, master key или server config в SYSVOL в открытом виде. Используйте

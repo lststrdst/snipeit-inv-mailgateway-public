@@ -1,5 +1,5 @@
 [Unit]
-Description=SnipeIT Inventory Gateway v1.0.0 weekly health report
+Description=SnipeIT Inventory Gateway v1.0.0 weekly inventory report
 After=network-online.target
 
 [Service]

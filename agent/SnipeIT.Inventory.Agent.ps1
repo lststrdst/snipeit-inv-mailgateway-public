@@ -134,12 +134,26 @@ function Test-AgentConfiguration($Settings) {
     }
     if ([bool]$Settings.EnableSmtpFallback) {
         if ([string]::IsNullOrWhiteSpace([string]$Settings.SmtpHost) -or [int]$Settings.SmtpPort -ne 587) {
-            throw 'SMTP fallback must use a configured STARTTLS host on port 587'
+            throw 'SMTP fallback requires a configured host on port 587'
         }
         if ([string]$Settings.MailFrom -notmatch '^[^@\s]+@[^@\s]+$' -or
-            [string]$Settings.MailTo -notmatch '^[^@\s]+@[^@\s]+$') {
-            throw 'SMTP sender and recipient must be valid configured addresses'
+            [string]$Settings.MailTo -notmatch '^[^@\s]+@[^@\s]+$' -or
+            ([string]$Settings.MailFrom).ToLowerInvariant() -eq ([string]$Settings.MailTo).ToLowerInvariant()) {
+            throw 'SMTP sender and recipient must be distinct service addresses'
         }
+    }
+    $nonStandardAccounts = @()
+    foreach ($fieldName in @('NonStandardAccounts', 'UsernameExceptions')) {
+        if ($Settings.PSObject.Properties.Name -notcontains $fieldName) { continue }
+        foreach ($exception in @($Settings.$fieldName)) {
+            if ([string]$exception -notmatch '^[a-zA-Z0-9._-]{1,128}$') {
+                throw 'NonStandardAccounts contains an invalid account name'
+            }
+            $nonStandardAccounts += ([string]$exception).Trim().ToLowerInvariant()
+        }
+    }
+    if (@($nonStandardAccounts | Sort-Object -Unique).Count -ne $nonStandardAccounts.Count) {
+        throw 'NonStandardAccounts must not contain duplicates'
     }
 }
 
@@ -148,8 +162,19 @@ function Write-AgentLog([string]$Level, [string]$Message) {
         $path = [string]$script:Settings.LogPath
         $directory = Split-Path -Parent $path
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
-        if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Item -LiteralPath $path).Length -gt 2097152) {
-            Move-Item -LiteralPath $path -Destination "$path.1" -Force
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Item -LiteralPath $path).Length -ge 2097152) {
+            $oldestArchive = "${path}.5"
+            if (Test-Path -LiteralPath $oldestArchive -PathType Leaf) {
+                Remove-Item -LiteralPath $oldestArchive -Force
+            }
+            for ($archiveIndex = 4; $archiveIndex -ge 1; $archiveIndex--) {
+                $sourceArchive = "${path}.$archiveIndex"
+                $destinationArchive = "${path}.$($archiveIndex + 1)"
+                if (Test-Path -LiteralPath $sourceArchive -PathType Leaf) {
+                    Move-Item -LiteralPath $sourceArchive -Destination $destinationArchive -Force
+                }
+            }
+            Move-Item -LiteralPath $path -Destination "${path}.1" -Force
         }
         $safe = $Message -replace '[\r\n]+', ' '
         Add-Content -LiteralPath $path -Encoding UTF8 -Value (
@@ -176,8 +201,16 @@ function Get-InteractiveIdentity($Computer) {
     } catch {
         Write-AgentLog 'warning' "Interactive session lookup failed: $($_.Exception.GetType().Name)"
     }
-    $blockedExact = @('administrator', 'guest', 'krbtgt', 'system', 'shared-terminal', 'snipeit')
+    $blockedExact = @('administrator', 'guest', 'krbtgt', 'system', 'snipeit')
     $blockedPrefixes = @('ad_', 'svc_', 'service_', 'dwm-', 'umfd-')
+    $nonStandardAccounts = @()
+    foreach ($fieldName in @('NonStandardAccounts', 'UsernameExceptions')) {
+        if ($script:Settings.PSObject.Properties.Name -contains $fieldName) {
+            $nonStandardAccounts += @($script:Settings.$fieldName | ForEach-Object {
+                ([string]$_).Trim().ToLowerInvariant()
+            })
+        }
+    }
     $seen = @{}
     foreach ($candidate in $candidates) {
         $raw = [string]$candidate.value
@@ -188,7 +221,9 @@ function Get-InteractiveIdentity($Computer) {
         $seen[$normalized] = $true
         if ($normalized.EndsWith('$') -or $blockedExact -contains $normalized) { continue }
         if (@($blockedPrefixes | Where-Object { $normalized.StartsWith($_) }).Count -gt 0) { continue }
-        if ($normalized -notmatch '^[a-z0-9._-]{1,128}$') { continue }
+        # Only explicitly listed non-standard accounts may bypass the pattern.
+        if ($normalized -notmatch '^[a-z]\.[a-z]+(?:-[a-z]+)?$' -and
+            $nonStandardAccounts -notcontains $normalized) { continue }
         return [ordered]@{
             detected_username = $raw
             observed_account = $normalized
@@ -248,7 +283,7 @@ function Get-InventoryPayload {
         serial_number = $serial
         identity = $identity
         inventory = $inventory
-        agent = [ordered]@{ name = 'SnipeIT Inventory Agent'; version = $AgentVersion; transport = 'https+smtp+queue' }
+        agent = [ordered]@{ name = 'SnipeIT Inventory Gateway'; version = $AgentVersion; transport = 'https+smtp+queue' }
     }
 }
 
@@ -295,9 +330,14 @@ function Send-FallbackMail($Settings, $Envelope) {
     }
     $eventId = [string]$Envelope.event_id
     $message = New-Object Net.Mail.MailMessage($Settings.MailFrom, $Settings.MailTo)
-    $message.Subject = "[SNIPEIT-INVENTORY] RELAY: $env:COMPUTERNAME $($eventId.Substring(0, 16))"
+    $message.Subject = "[SnipeIT Inventory Gateway][RELAY] $env:COMPUTERNAME - event $($eventId.Substring(0, 16))"
     $message.Headers.Add('X-SnipeIT-Relay', '1')
-    $message.Body = 'Encrypted SnipeIT Inventory fallback event.'
+    $message.Headers.Add('X-SnipeIT-Category', 'relay')
+    $message.Headers.Add('X-SnipeIT-Mail-Class', 'transport')
+    $message.Headers.Add('X-SnipeIT-Gateway-Version', $AgentVersion)
+    $message.Headers.Add('Auto-Submitted', 'auto-generated')
+    $message.Headers.Add('X-Auto-Response-Suppress', 'All')
+    $message.Body = 'Encrypted inventory event for fallback delivery through Gateway.'
     $temp = Join-Path $env:TEMP ("inventory-{0}.snipeit-event.json" -f $eventId)
     try {
         [IO.File]::WriteAllText($temp, (ConvertTo-CanonicalJson $Envelope), (New-Object Text.UTF8Encoding($false)))
@@ -316,7 +356,7 @@ function Send-Envelope($Settings, $Envelope) {
     $body = ConvertTo-CanonicalJson $Envelope
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Method Post -Uri $Settings.GatewayUrl `
-            -ContentType 'application/json' -Headers @{ 'User-Agent' = "SnipeIT-Inventory-Agent/$AgentVersion" } `
+            -ContentType 'application/json' -Headers @{ 'User-Agent' = "SnipeIT-Inventory-Gateway/$AgentVersion" } `
             -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 20
         if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300) {
             throw "Gateway returned HTTP $($response.StatusCode)"

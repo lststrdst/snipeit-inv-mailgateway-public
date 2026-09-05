@@ -12,6 +12,7 @@ from .config import load_config
 from .mail import collect
 from .notifications import Notifier
 from .queue import EventQueue
+from .snipeit import SnipeITClient
 from .worker import run_forever, run_once
 
 
@@ -73,8 +74,11 @@ def main() -> int:
             queue.close()
     elif args.command == "weekly-report":
         queue = EventQueue(config.queue.path)
+        client = SnipeITClient(config.snipeit)
         try:
-            Notifier(config, queue).weekly_health()
+            sent = Notifier(config, queue).weekly_inventory(client)
+            print(json.dumps({"sent": sent}, sort_keys=True))
         finally:
+            client.close()
             queue.close()
     return 0

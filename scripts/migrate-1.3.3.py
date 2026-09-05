@@ -38,7 +38,7 @@ def main() -> int:
         "api": {},
         "snipeit": {
             "url": old.get("snipe_url", "https://127.0.0.1"),
-            "host_header": old.get("snipe_host_header", "snipeit.example.com"),
+            "host_header": old.get("snipe_host_header", "snipeit.local"),
             "api_token": old["snipe_token"],
             "verify_tls": old.get("verify_tls", False),
         },
